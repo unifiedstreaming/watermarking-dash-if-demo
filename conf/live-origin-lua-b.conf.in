@@ -1,0 +1,2 @@
+Header set X-ORIGIN "ORIGIN-B %D microseconds"
+Include /etc/apache2/sites-enabled/remote-storage-origin-lua.conf.in

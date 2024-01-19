@@ -1,0 +1,104 @@
+version: "3"
+services:
+  unified-origin:
+    image: lua-unified-origin
+    build: docker/unified-origin/docker/origin-ubuntu
+    container_name: unified-origin
+    networks:
+      - origin-shield-cache
+    ports:
+      - 8081:80
+    environment:
+      - REMOTE_STORAGE_URL=http://usp-research.s3.eu-central-1.amazonaws.com/dataset/
+      - REMOTE_PATH=vod
+      - USP_LICENSE_KEY
+      - UspLicenseKey=${USP_LICENSE_KEY}
+      - LOG_LEVEL=warn
+      - LOG_FORMAT=${LOG_FORMAT_ORIGIN}
+    volumes:
+    # Apache Alpine configuration
+    # - ${PWD}/conf/remote-storage-origin.conf.in:/etc/apache2/conf.d/unified-origin.conf
+    # Apache Ubuntu configuration
+    - ./conf/remote-storage-origin-lua.conf.in:/etc/apache2/sites-enabled/unified-origin.conf
+    - ./conf/lua:/var/www/unified-origin/lua
+
+    healthcheck:
+      test: kill -0 1
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  varnishd:
+    privileged: true
+    image: quay.io/varnish-software/varnish-plus:latest
+    container_name: varnishd
+    networks:
+      - origin-shield-cache
+    ports:
+      - 80:80
+    depends_on:
+      - unified-origin
+    environment:
+      - MSE_MEMORY_TARGET=1%
+      - VARNISH_EXTRA=-n varnish
+      - VARNISH_VCL_CONF=/etc/varnish/default.vcl
+      - VARNISH_LISTEN_PORT=80
+      # VARNISHD_ONLY: "false"
+      - VARNISHLOG=true #varnishlog and varnishncsa are mutually exclusive
+      - VARNISHNCSA=false
+      - TARGET_HOST=unified-origin
+
+    volumes:
+      - ./conf/watermarking_poc_vod_sidecar.vcl:/etc/varnish/default.vcl.in
+
+
+  wmt-generator:
+    privileged: true
+    image: quay.io/varnish-software/varnish-plus:latest
+    container_name: wmt-generator
+    networks:
+      - origin-shield-cache
+    ports:
+      - 8083:80
+    depends_on:
+      - varnishd
+    environment:
+      - MSE_MEMORY_TARGET=1%
+      - VARNISH_EXTRA=-n varnish
+      - VARNISH_VCL_CONF=/etc/varnish/default.vcl
+      - VARNISH_LISTEN_PORT=80
+      - VARNISHLOG=true #varnishlog and varnishncsa are mutually exclusive
+      - VARNISHNCSA=false
+      - TARGET_HOST=127.0.0.1 # NO backend required
+    volumes:
+      - ./conf/jwt_verify.vcl:/etc/varnish/jwt_verify.vcl:ro
+      - ./conf/wmt_generator_server.vcl:/etc/varnish/default.vcl.in:ro
+
+  varnishd-jwt:
+    privileged: true
+    image: quay.io/varnish-software/varnish-plus:latest
+    # Latest Varnish Enterprise version
+    container_name: varnishd-jwt
+    networks:
+      - origin-shield-cache
+    ports:
+      - 8080:80
+    depends_on:
+      - unified-origin
+      - wmt-generator
+    environment:
+      - MSE_MEMORY_TARGET=1%
+      - VARNISH_EXTRA=-n varnish
+      - VARNISH_VCL_CONF=/etc/varnish/default.vcl
+      - VARNISH_LISTEN_PORT=80
+      - VARNISHLOG=true #varnishlog and varnishncsa are mutually exclusive
+      - VARNISHNCSA=false
+      - TARGET_HOST=unified-origin
+
+    volumes:
+      - ${PWD}/conf/watermarking_poc_vod_with_jwt.vcl:/etc/varnish/default.vcl.in
+
+
+networks:
+  origin-shield-cache:
+    driver: bridge
