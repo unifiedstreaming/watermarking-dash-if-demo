@@ -2,44 +2,63 @@
 .DEFAULT_GOAL := all
 .SECONDARY:
 
-COMPOSE=docker-compose
-COMPOSE_EXT_PARAMS=
+COMPOSE=docker compose
+COMPOSE_EXT_PARAMS=--force-recreate
 
 all:
 	docker-compose up $(COMPOSE_EXT_PARAMS)
 
 
-origin:
-	$(COMPOSE) -f docker-compose-jwt.yml up -d unified-origin \
+### Live
+setup-1:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-1.yml up  \
 		$(COMPOSE_EXT_PARAMS)
 
-varnishd:
-	$(COMPOSE) -f docker-compose-jwt.yml up varnishd $(COMPOSE_EXT_PARAMS)
-
-jwt:
-	$(COMPOSE) -f docker-compose-jwt.yml up -d varnishd-jwt \
-		$(COMPOSE_EXT_PARAMS)
-	@echo "Waiting for docker compose to be deployed"
-	sleep 5
-
-clean-vod:
-	docker-compose -f docker-compose-jwt.yml down
-
-live-demo-cmaf:
-	cd live; $(COMPOSE) -f docker-compose-live-demo-cmaf.yml up \
-		$(COMPOSE_EXT_PARAMS)
-
-live:
-	cd live; $(COMPOSE) -f docker-compose.yml up clear
-		$(COMPOSE_EXT_PARAMS)
-
-wm-live:
-	cd live; $(COMPOSE) -f docker-compose-live-watermarking.yml up  --build \
-		$(COMPOSE_EXT_PARAMS)
-
-clean-live:
-	cd live; $(COMPOSE) -f docker-compose-live-watermarking.yml down \
+clean-setup-1:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-1.yml down  \
 		--remove-orphans
+
+setup-2:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-2.yml up   \
+		$(COMPOSE_EXT_PARAMS)
+
+restart-setup-2:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-2.yml restart  \
+		-t 30 varnish-cache-proxy
+
+clean-setup-2:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-2.yml down  \
+		--remove-orphans
+
+setup-v2:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-2-one-side-car.yml up   \
+		$(COMPOSE_EXT_PARAMS)
+
+restart-setup-v2:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-2-one-side-car.yml restart  \
+		-t 30 varnish-cache-proxy
+
+clean-setup-v2:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-2-one-side-car.yml down  \
+		--remove-orphans
+
+
+setup-3:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-3.yml up  --build \
+		$(COMPOSE_EXT_PARAMS)
+
+clean-setup-3:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-3.yml down  \
+		--remove-orphans
+
+setup-4:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-4.yml up \
+		$(COMPOSE_EXT_PARAMS)
+
+clean-setup-4:
+	$(COMPOSE) -f docker-compose-live-watermarking-setup-4.yml down  \
+		--remove-orphans
+
 
 test: test-vod test-live
 

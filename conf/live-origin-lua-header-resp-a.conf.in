@@ -1,0 +1,3 @@
+Header set X-ORIGIN "\"ORIGIN-A\""
+Header set X-ORIGIN-TIME "%D microseconds"
+Include /etc/apache2/sites-enabled/remote-storage-origin-lua-response-header.conf.in

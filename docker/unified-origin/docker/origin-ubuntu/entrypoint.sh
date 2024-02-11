@@ -59,13 +59,18 @@ fi
 rm -f /run/apache2/apache2.pid
 
 # create ingest publishing point
-if [ ! -f /var/www/unified-origin/$channel/$channel.isml ]
+if [ ! -f /var/www/unified-origin/$channel_virtual_path/$channel.isml ]
   then
-    mkdir -p /var/www/unified-origin/$channel
-    chown -R www-data:www-data /var/www/unified-origin/$channel
+    mkdir -p /var/www/unified-origin/$channel_virtual_path
+    chown -R www-data:www-data /var/www/unified-origin/$channel_virtual_path
     mp4split \
-      -o "/var/www/unified-origin/$channel/$channel.isml" \
+      -o "/var/www/unified-origin/$channel_virtual_path/$channel.isml" \
       $channel_options
+
+    # print configuration to console for debug purpouses
+    echo "channel_options: $channel_options"
+    echo "isml: /var/www/unified-origin/$channel_virtual_path/$channel.isml"
+
 fi
 
 

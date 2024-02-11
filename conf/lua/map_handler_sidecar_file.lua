@@ -1,5 +1,4 @@
-apache2 = require('apache2')
-json = require('json')
+require('apache2')
 
 function add_output_headers(r)
     -- r.headers_out['r.the_request'] = r.the_request
@@ -10,6 +9,12 @@ function add_output_headers(r)
     -- r.headers_out['r_media_unparsed_uri'] = r_media_unparsed_uri
     -- r.headers_out['r.uri'] = r.uri
     return 0
+end
+
+function add_cache_headers(r)
+    -- r.headers_out['Cache-Control'] = "max-age=3600"
+    r.headers_out['Cache-Control'] = "no-cache, no-store, must-revalidate"
+    return nil
 end
 
 function sort_upper(a, b)
@@ -86,8 +91,7 @@ function create_wmpaceinfo_sidecar_file(r, is_init_segment)
 		segment_regex = "\"foo\"",
 	  }
 	local result = create_json_object(keys, data)
-    -- r.headers_out['WMPaceInfo'] = json.encode(data)
-    -- json_str = json.encode(data)
+
     r.headers_out['WMPaceInfo'] = result
     json_str = result
     r.headers_out['Content-Type'] = 'application/json'
@@ -133,6 +137,7 @@ function filter(r)
         add_output_headers(r)
         r.headers_out['log'] = "Entered /translate-name"
         local json_body_sidecar_file = create_wmpaceinfo_sidecar_file(r, false)
+        add_cache_headers(r)
         r:puts(json_body_sidecar_file)
         -- r:debug(("fileSize: %s"):format(string.len(json_body_sidecar_file)))
         r.status = 200
@@ -143,6 +148,7 @@ function filter(r)
         local uri_init_match = string.match(r.unparsed_uri, '^.*/WMPaceInfo/.*=[0-9]+.json$')
         if uri_init_match ~= nil then
             local json_body_side_car_file_no_watermark = create_wmpaceinfo_sidecar_file(r, true)
+            add_cache_headers(r)
             r:puts(json_body_side_car_file_no_watermark)
             r.status = 200
             return apache2.OK

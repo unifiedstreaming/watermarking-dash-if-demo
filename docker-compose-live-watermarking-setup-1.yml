@@ -1,0 +1,101 @@
+version: "2.1"
+services:
+  live-ffmpeg-a:
+    build: ./docker/ffmpeg/docker/ffmpeg
+    container_name: live-ffmpeg-a
+    networks:
+      - origin-shield-cache
+    environment:
+      - PUB_POINT_URI=http://live-origin-a/ingress-a/ingress.isml
+      - 'TRACKS=${ENCODER_TRACKS}'
+    depends_on:
+      live-origin-a:
+        condition: service_healthy
+  live-origin-a:
+    container_name: live-origin-a
+    # Build internal image of Ubuntu and configure entrypoint.sh to create
+    # a publishing point when the container starts.
+    build: ./docker/unified-origin/docker/origin-ubuntu
+    ports:
+      - 8081:80
+    networks:
+      - origin-shield-cache
+    volumes:
+      - ./conf/live-origin-lua-a.conf.in:/etc/apache2/sites-enabled/unified-origin.conf
+      - ./conf/remote-storage-origin-lua.conf.in:/etc/apache2/sites-enabled/remote-storage-origin-lua.conf.in
+      - ./conf/lua:/var/www/unified-origin/lua
+    environment:
+      - REST_API_PORT=8081
+      - LOG_LEVEL=warn
+      - UspLicenseKey=$USP_LICENSE_KEY
+      - channel_virtual_path=ingress-a
+      - channel=ingress
+      - channel_options=${LIVE_CHANNEL_OPTIONS}
+    healthcheck:
+      test: kill -0 1
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  varnish-cache-proxy:
+    ## Varnish Enterprise
+    image: unifiedstreaming/varnish-cache-plus:latest
+    # image: quay.io/varnish-software/varnish-plus:latest
+    container_name: varnish-cache-proxy
+    expose:
+      - "80"
+      - "443"
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - origin-shield-cache
+    depends_on:
+      - live-ffmpeg-a
+    volumes:
+      - ./conf/accounting_metrics.vcl:/etc/varnish/accounting_metrics.vcl
+      - ./conf/watermarking_live_setup_1.vcl:/etc/varnish/default.vcl.in
+      - ./certbot/dynamic/demo.robertoramos.me:/etc/letsencrypt/live/demo.robertoramos.me
+      - ./conf/tls.conf:/etc/varnish/tls.conf
+      - varnish1vsm:/var/lib/varnish/:rw
+    environment:
+      TARGET_HOST: "live-origin-a"
+      TARGET_PORT: "80"
+      MSE_MEMORY_TARGET: 10G
+      VARNISH_EXTRA: -n varnish
+      VARNISH_VCL_CONF: /etc/varnish/default.vcl
+      VARNISH_LISTEN_PORT: 80
+      # VARNISHD_ONLY: "false"
+      VARNISHLOG: "false" #varnishlog and varnishncsa are mutually exclusive
+      VARNISHNCSA: "false"
+      VARNISH_TLS_CFG: "/etc/varnish/tls.conf"
+    healthcheck:
+      test: kill -0 1
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  varnishncsa:
+    image: unifiedstreaming/varnish-cache-plus:latest
+    # build: docker/varnish-plus
+    container_name: varnishncsa
+    volumes:
+      - varnish1vsm:/var/lib/varnish/:ro
+    environment:
+      - VARNISH_NAME=varnish
+    networks:
+      - origin-shield-cache
+    entrypoint: "/usr/bin/varnishncsa -F '${LOG_FORMAT_VARNISH}' -n varnish"
+    depends_on:
+      - varnish-cache-proxy
+
+volumes:
+  varnish1vsm:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+
+
+networks:
+  origin-shield-cache:
+    driver: bridge

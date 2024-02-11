@@ -20,18 +20,26 @@ import xbody;
 import urlplus; // Seems to work only with req.rul
 import str;
 
-# Default backend definition. Set this to point to your content server.
+include "/etc/varnish/accounting_metrics.vcl";
+
+// Because each req.url is saved as cache key the two A/B origins need
+// to have different virtual paths.
 backend default {
-    .host = "{{TARGET_HOST}}";
-    .port = "{{TARGET_PORT}}";
+    .host = "live-origin-a";
+    .port = "80";
+}
+
+backend backend-b {
+    .host = "live-origin-b";
+    .port = "80";
 }
 
 sub vcl_init
 {
   new db = kvstore.init();
   ## Set the default 2nd subdirectories of the know A/B variants
-  db.set(0, "default-blue", 30d);
-  db.set(1, "default-green", 30d);
+  db.set(0, "ingress-a", 30d);
+  db.set(1, "ingress-b", 30d);
 
   # Example ABC pattern mapping
   db.set("a", "default-green", 30d);
@@ -44,6 +52,9 @@ sub vcl_init
   db.set("h", "default-blue", 30d);
   db.set("i", "default-green", 30d);
   db.set("j", "default-blue", 30d);
+
+  call accounting_vcl_init;
+
 }
 
 // Returns the value req.http.X-key form the table based on req.http.X-key
@@ -62,9 +73,33 @@ sub get_value_table {
   // return req.http.X-Foo or ""
 }
 
+# // Returns nothing and only sets req.backend_hint for variant A/B
+# // req.http.X-key is equals "0" OR "1" of the A/B variants
+# sub set_backend_variant {
+#   std.log("**** Enters set_backend_variant ****");
+#   std.log("req.http.X-key: " + req.http.X-key);
+#   set req.http.X-Foo = "";
+
+#   if (req.http.X-key == "0") {
+#     std.log("Set variant to backend A");
+#     set req.backend_hint = default;
+#     set req.http.X-Foo = "0";
+#   }
+#   elseif (req.http.X-key == "1")
+#   {
+#     std.log("Set variant to backend B");
+#     set req.backend_hint = backend-b;
+#     set req.http.X-Foo = "1";
+#   }
+#   else
+#   {
+#     std.log("No value found for key: " + req.http.X-key);
+#     return(synth(400, "No backend found for req.http.X-key"));
+#   }
+# }
+
 sub vcl_recv {
   std.log("**** Starts vcl_recv ****");
-  set req.ttl = 10s;
   set req.grace = 0s;
   set req.http.X-Request-ID = utils.fast_random_int(999999999);
 
@@ -89,10 +124,8 @@ sub vcl_recv {
   if (req.restarts == 0){
     set req.http.init-url = req.url;
     # Provide a default variant A for first request
-    if (urlplus.get_extension() ~ "mpd|dash|m4s|m3u8" && req.url !~ "default-green"
-      && req.url ~ "vod"
-    ) {
-      urlplus.url_add("default-green", keep=1, position=1);
+    if (urlplus.get_extension() ~ "mpd|dash|m4s|m3u8" ) {
+      urlplus.url_add("ingress-a", keep=1, position=0);
       urlplus.write();
       std.log("req.http.url-add: " + req.url);
     }
@@ -124,6 +157,10 @@ sub vcl_recv {
       # Set the position in terms of the lenght of the WM pattern
       set req.http.position-wm = utils.mod(std.integer(req.http.position, 0), str.len(req.http.pattern));
       set req.http.variant = str.substr(req.http.pattern, 1, std.integer(req.http.position-wm, 0));
+      std.log("*** Applying Watermarking based on pattern position with MOD function ***");
+      std.log("req.http.position-wm: " + req.http.position-wm);
+      std.log("req.http.variant: " + req.http.variant);
+
     }
     else
     {
@@ -135,26 +172,41 @@ sub vcl_recv {
     # Get the subdirectory of the random key int (0/1)
     set req.http.X-key = req.http.variant;
     call get_value_table;
+    //call set_backend_variant;
     if (req.http.X-Foo != "" && req.http.variant != "")
     {
       std.log("req.http.init-url: " + req.http.init-url);
       std.log("Choosen A/B: " + req.http.X-Foo);
 
-      ## Use urlplus vmod to add the value from kvstore as a subdirectory
-      ## in the incoming URL
-      ## For example:
-      # Incoming URL: /vod/roll.ism/dash/foo=10-132.m4s
-      # to
-      # Updated  URL: /vod/${kvstore-value}/roll.ism/dash/foo=10-132.m4s
+      # ## Use urlplus vmod to add the value from kvstore as a subdirectory
+      # ## in the incoming URL
+      # ## For example:
+      # # Incoming URL: /vod/roll.ism/dash/foo=10-132.m4s
+      # # to
+      # # Updated  URL: /vod/${kvstore-value}/roll.ism/dash/foo=10-132.m4s
       set req.url = req.http.init-url;
-      urlplus.url_add(req.http.X-Foo, keep=1, position=1);
-      # urplus.write() will automatically modify req.url
-      urlplus.write();
+      urlplus.url_add(req.http.X-Foo, keep=1, position=0);
       std.log("req.http.url-add: " + req.url);
+      urlplus.write(); // will automatically modify req.url
+
+      std.log("req.http.host: " + req.http.host);
+      std.log("req.url: " + req.url);
+      if (req.http.X-Foo == "ingress-a") {
+        set req.backend_hint = default;
+      }
+      elseif (req.http.X-Foo == "ingress-b") {
+        set req.backend_hint = backend-b;
+      }else {
+        std.log("No value found for key: " + req.http.X-Foo);
+        return(synth(400, "No backend found for req.http.X-Foo"));
+      }
+
       set req.http.x-variant = req.http.X-Foo;
       set req.http.x-state = "valid";
     }
   }
+
+  call accounting_vcl_recv;
 
   std.log("**** Ends vcl_recv ****");
 }
@@ -168,9 +220,9 @@ sub vcl_backend_fetch {
 
 sub vcl_backend_response {
   std.log("**** Starts vcl_backend_response ****");
-    set beresp.ttl = 10s;
     set beresp.grace = 0s;
     std.log("urlplus.get_extension(): " + urlplus.get_extension());
+    std.log("bereq.http.x-state: " + bereq.http.x-state);
     if (urlplus.get_extension() ==  "json"){
         std.log("Is a json file");
         xbody.capture("name", "(.*)", "\1"); # capture all
@@ -217,6 +269,9 @@ sub vcl_backend_response {
         set beresp.http.x-state = "backend_check";
         set beresp.http.side-car-url = bereq.http.X-side-car;
     }
+
+  call accounting_vcl_backend_response;
+
   std.log("**** Ends vcl_backend_response ****");
 }
 
@@ -262,9 +317,9 @@ sub vcl_deliver {
     set req.http.position = xbody.get("position");
     return (restart);
   }
-
+  set resp.http.X-Cache-Control = resp.http.Cache-Control;
   unset resp.http.Cache-Control;
-  set resp.http.file = "watermarking_poc_vod_sidecar.vcl";
+  set resp.http.file = "watermarking_live_setup_2.vcl";
   std.log("**** Ends vcl_deliver ****");
 
 }

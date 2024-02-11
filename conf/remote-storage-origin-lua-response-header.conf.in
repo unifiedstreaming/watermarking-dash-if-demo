@@ -1,0 +1,86 @@
+# TestRoot - absolute path to parent of parent of this file
+<IfDefine !TestRoot>
+  Define TestRoot "/var/www/unified-origin"
+</IfDefine>
+
+AddHandler smooth-streaming.extensions .ism .isml
+
+ServerName unified-origin
+
+UspLicenseKey /etc/usp-license.key
+
+
+<IfDefine LOG_FORMAT>
+  LogFormat '${LOG_FORMAT}' log_format
+</IfDefine>
+<IfDefine !LOG_FORMAT>
+  LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-agent}i\" %D" log_format
+</IfDefine>
+
+# Use mod_lua OutputFilter to add WMPaceInfo
+LuaOutputFilter OutputFilter  /var/www/unified-origin/lua/handler_wmpaceinfo.lua filter
+
+# Origin virtualhost
+<VirtualHost 0.0.0.0:81>
+
+</VirtualHost>
+
+<VirtualHost 0.0.0.0:80>
+  DocumentRoot ${TestRoot}
+  # don't log kubernetes probes
+  SetEnvIf User-Agent "kube-probe" dontlog
+  CustomLog /dev/stdout log_format
+  ErrorLog /dev/stderr
+  # CustomLog /var/log/apache2/access.log log_format
+  # ErrorLog /var/log/apache2/error.log
+  KeepAliveTimeout 65
+
+  LogLevel ${LOG_LEVEL}
+
+  SSLProxyEngine on
+
+  # Add the original request that the Player/CDN/ Cache requested.
+  Header merge Real-Req-Debug "expr=%{THE_REQUEST}"
+
+  # Enable Origin and use subrequests instead of libcurl
+  <Location />
+    UspHandleIsm on
+    UspEnableSubreq on
+  </Location>
+
+  <LocationMatch ".*\.ism[l]?$">
+    UspContentId on
+  </LocationMatch>
+  # Ends testing feature for caching Remix deduplicated content
+
+  ## Apply mod_lua OutputFilter
+  <If "%{QUERY_STRING} =~ /file=.*(\.m4s|\.dash)$/">
+    SetOutputFilter OutputFilter
+  </If>
+
+  Header set Access-Control-Allow-Headers "origin, range"
+  Header set Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+  Header set Access-Control-Allow-Origin "*"
+  Header set Access-Control-Expose-Headers "Server,range"
+
+
+  # remote storage configuration
+  <IfDefine REMOTE_STORAGE_URL>
+    <Location "/${REMOTE_PATH}/">
+      IsmProxyPass "${REMOTE_STORAGE_URL}"
+    </Location>
+
+    <Proxy "${REMOTE_STORAGE_URL}">
+      ProxySet connectiontimeout=5 enablereuse=on keepalive=on retry=0 timeout=30 ttl=300
+      RequestHeader unset Accept-Encoding
+    </Proxy>
+  </IfDefine>
+
+
+</VirtualHost>
+
+<Directory ${TestRoot}>
+  Require all granted
+</Directory>
+
+

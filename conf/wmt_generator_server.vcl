@@ -57,8 +57,8 @@ sub add_jwt_payload {
   ## for the momment
 
   # Selected WM pattern
-  set req.http.pattern = "0110111011";
-
+  #set req.http.pattern = "0110111011";
+  std.log("req.http.pattern: " + req.http.pattern );
 
   #--------------- Use format VMOD to build JSON payload----------------------#
 
@@ -101,7 +101,7 @@ sub add_jwt_payload {
   {
     # Set the JWT topken as an Authorization header to validate it
     set req.http.Authorization = "Bearer " + req.http.jwt;
-    set req.http.X-URL = "http://localhost:8080/vod/" + req.http.jwt + "/Density_Pepijn_v3-origin04_combined-c-m1-pre-roll.ism/.mpd";
+    set req.http.X-URL = "http://localhost/" + req.http.jwt + "/ingress.isml/.mpd";
     call verify_jwt; # Must include jwt_verify.vcl"
     return (synth(200,req.http.X-URL));
     # return (synth(200,{"
@@ -180,5 +180,6 @@ sub vcl_deliver {
   set resp.http.jwt-json = req.http.jwt-json;
   set resp.http.Authorization = req.http.Authorization;
   set resp.http.X-Request-ID = req.http.X-Request-ID;
-  set resp.http.vcl-file =  "example_jwt_generate_validate.vcl";
+  set resp.http.pattern = req.http.pattern;
+  set resp.http.vcl-file =  "wmt_generator_server.vcl";
 }

@@ -1,0 +1,6 @@
+isodate
+locust
+m3u8
+mpegdash
+pydantic
+typer[all]
